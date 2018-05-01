@@ -1,0 +1,26 @@
+{
+    "name": "phan/phan-sql-plugin",
+    "description": "A plugin for phan/phan that checks sql usages",
+    "keywords": ["php"],
+    "type": "project",
+    "license": "Apache 2.0",
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "authors": [
+        {
+            "name": "Tyson Andre"
+        }
+    ],
+    "config": {
+        "sort-packages": true,
+        "platform": {
+            "php": "7.0.24"
+        }
+    },
+    "require-dev": {
+        "phan/phan": "^0.12.4"
+    },
+    "require": {
+        "phpmyadmin/sql-parser": "^4.2"
+    }
+}

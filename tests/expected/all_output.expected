@@ -1,0 +1,2 @@
+src/001_exec_bind.php:3 PhanPluginOraMissingBindVar Missing bind var :bar. Actual bind vars: (:baz)
+src/001_exec_bind.php:3 PhanPluginOraUnexpectedBindVar Unexpected bind var :baz. Expected bind vars: (:bar)
