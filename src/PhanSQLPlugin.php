@@ -12,6 +12,7 @@ use Phan\PluginV2;
 use Phan\PluginV2\AnalyzeFunctionCallCapability;
 use Phan\PluginV2\ReturnTypeOverrideCapability;
 
+use PhpMyAdmin\SqlParser\Lexer;
 use PhpMyAdmin\SqlParser\Parser;
 
 // require_once __DIR__ . '/../vendor/autoload.php';
@@ -19,7 +20,7 @@ use PhpMyAdmin\SqlParser\Parser;
 /**
  * Checks of uses of databases.
  *
- * NOTE: Code style imitates phan's code style
+ * This uses Phan's code style
  *
  * @see DollarDollarPlugin for generic plugin documentation.
  */
@@ -52,6 +53,7 @@ class PhanSQLPlugin extends PluginV2 implements
             if (!is_string($sql_raw) || $sql_raw === '') {
                 return;
             }
+
             // Try to find the keys of the array literal, at least for array literals with 100% known keys.
             $bind_vars_union_type = UnionTypeVisitor::unionTypeFromNode($code_base, $context, $bind_vars_node);
             if (!$bind_vars_union_type->hasTopLevelArrayShapeTypeInstances()) {
@@ -189,8 +191,15 @@ class PhanSQLPlugin extends PluginV2 implements
                 return $default_type;
             }
 
+            // TODO: Move overly specific code into a subclass
+            $sql_raw = preg_replace('/\{\{[pt]key\}\}/i', '', $sql_raw);
+
+            // if token is :\w+, then the variable is actually a bind var.
+            // $tokens = (new Lexer($sql_raw))->tokens
+
             $parser = new Parser($sql_raw);
-            var_dump($parser->statements);
+            //var_dump($parser->statements);
+            //var_dump((new Lexer($sql_raw))->list);
 
             return $default_type;
         };

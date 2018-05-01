@@ -1,3 +1,3 @@
 <?php
 $ora = new Ora();
-$ora->execSql('SELECT * FROM example where foo = :bar', ['baz' => 'x']);
+$result = $ora->execSql("SELECT * FROM example{{pkey}} where foo = :bar AND x = 'HH:MM'", ['baz' => 'x']);
