@@ -242,9 +242,10 @@ class PhanSQLPlugin extends PluginV2 implements
                     // `SELECT * from table WHERE cond` has unknown columns
                     return null;
                 }
-                if (in_array($alias, ['over', 'keep'])) {
+                if (in_array($alias, ['over', 'keep', 'trunc'])) {
                     // - sql-parser improperly parses `count(*) over()` as a column with name 'over'
                     // - and `SELECT x1, max(x2) KEEP (DENSE_RANK LAST ORDER BY x3) AS desired_column WHERE ... GROUP BY x4`
+                    // - and TRUNC()
                     // TODO: Check if oracle specific, file a bug if oracle support is feasible
                     return null;
                 }
