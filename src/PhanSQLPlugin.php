@@ -7,8 +7,8 @@ use Phan\Issue;
 use Phan\Language\Context;
 use Phan\Language\Element\Method;
 use Phan\Language\Type\ArrayShapeType;
-use Phan\Language\Type\FalseType;
 use Phan\Language\Type\GenericArrayType;
+use Phan\Language\Type\NullType;
 use Phan\Language\UnionType;
 use Phan\PluginV2;
 use Phan\PluginV2\AnalyzeFunctionCallCapability;
@@ -175,45 +175,42 @@ class PhanSQLPlugin extends PluginV2 implements
     }
 
 
-    public function generateReturnAnalyzer(int $sql_param_index) : \Closure
+    public function generateReturnAnalyzer(int $sql_param_index, UnionType $default_types) : \Closure
     {
         $parser = new Parser();
-        return function(CodeBase $code_base, Context $context, Method $unused_method, array $args) use ($sql_param_index) : UnionType
+        return function(CodeBase $code_base, Context $context, Method $method, array $args) use ($sql_param_index, $default_types) : UnionType
         {
-            // TODO: Make this generalizable
-            $default_type = UnionType::fromFullyQualifiedString('array<int,string>|false');
-
             // E.g. a class constant or a literal string (or a concatenation?)
             $sql_node = $args[$sql_param_index] ?? null;
             if (is_null($sql_node)) {
-                return $default_type;
+                return $method->getUnionType();
             }
             // Try to find the actual SQL used
             $sql_raw = (new ContextNode($code_base, $context, $sql_node))->getEquivalentPHPValue();
             // $sql_raw could be the empty string if accessed as static::sql_overridden.
             if (!is_string($sql_raw) || $sql_raw === '') {
-                return $default_type;
+                return $method->getUnionType();
             }
 
             // TODO: Move overly specific code into a subclass
 
             // if token is :\w+, then the variable is actually a bind var.
             // $tokens = (new Lexer($sql_raw))->tokens
-            $override_type = $this->getReturnTypeForSQL($code_base, $sql_raw);
+            $override_type = $this->getReturnTypeForSQL($code_base, $sql_raw, $default_types);
             if ($override_type !== null) {
                 return $override_type;
             }
 
             //var_dump((new Lexer($sql_raw))->list);
 
-            return $default_type;
+            return $method->getUnionType();
         };
     }
 
     /**
      * @return ?UnionType
      */
-    protected function getReturnTypeForSQL(CodeBase $code_base, string $sql_raw)
+    protected function getReturnTypeForSQL(CodeBase $code_base, string $sql_raw, UnionType $default_types)
     {
         $sql_raw = $this->normalizeSQL($sql_raw);
         $parser = new Parser($sql_raw);
@@ -233,6 +230,17 @@ class PhanSQLPlugin extends PluginV2 implements
                 if (preg_match('/^\([^()]+\)$/', $alias)) {
                     $alias = substr($alias, 1, -1);
                 }
+                if ($alias === '*') {
+                    // `SELECT * from table WHERE cond` has unknown columns
+                    return null;
+                }
+                if (in_array($alias, ['over', 'keep'])) {
+                    // - sql-parser improperly parses `count(*) over()` as a column with name 'over'
+                    // - and `SELECT x1, max(x2) KEEP (DENSE_RANK LAST ORDER BY x3) AS desired_column WHERE ... GROUP BY x4`
+                    // TODO: Check if oracle specific, file a bug if oracle support is feasible
+                    return null;
+                }
+
                 if (!$alias) {
                     return null;
                 }
@@ -241,10 +249,9 @@ class PhanSQLPlugin extends PluginV2 implements
                 $field_types[$alias] = $mixed_union_type;
             }
             $shape_type = ArrayShapeType::fromFieldTypes($field_types, false);
-            return UnionType::of([
-                GenericArrayType::fromElementType($shape_type, false, GenericArrayType::KEY_INT),
-                FalseType::instance(false)
-            ]);
+            return $default_types->withType(
+                GenericArrayType::fromElementType($shape_type, false, GenericArrayType::KEY_INT)
+            );
         }
     }
 
@@ -259,7 +266,7 @@ class PhanSQLPlugin extends PluginV2 implements
      */
     public function getReturnTypeOverrides(CodeBase $unused_codebase) : array
     {
-        $analyzer = $this->generateReturnAnalyzer(0);
+        $analyzer = $this->generateReturnAnalyzer(0, NullType::instance(false)->asUnionType());
 
         return [
             // '\\Ora::execLimitSql' => $analyzer,
