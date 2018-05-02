@@ -1,2 +1,3 @@
 src/001_exec_bind.php:3 PhanPluginOraMissingBindVar Missing bind var :bar. Actual bind vars: (:baz)
 src/001_exec_bind.php:3 PhanPluginOraUnexpectedBindVar Unexpected bind var :baz. Expected bind vars: (:bar)
+src/002_get_select_rows.php:6 PhanTypeMismatchReturn Returning type array<int,array{bar:mixed,other:mixed,count(*):mixed}>|false but test() is declared to return string

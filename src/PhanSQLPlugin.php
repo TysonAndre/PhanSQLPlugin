@@ -7,13 +7,16 @@ use Phan\Issue;
 use Phan\Language\Context;
 use Phan\Language\Element\Method;
 use Phan\Language\Type\ArrayShapeType;
+use Phan\Language\Type\FalseType;
+use Phan\Language\Type\GenericArrayType;
 use Phan\Language\UnionType;
 use Phan\PluginV2;
 use Phan\PluginV2\AnalyzeFunctionCallCapability;
 use Phan\PluginV2\ReturnTypeOverrideCapability;
 
-use PhpMyAdmin\SqlParser\Lexer;
+//use PhpMyAdmin\SqlParser\Lexer;
 use PhpMyAdmin\SqlParser\Parser;
+use PhpMyAdmin\SqlParser\Statements\SelectStatement;
 
 // require_once __DIR__ . '/../vendor/autoload.php';
 
@@ -23,6 +26,7 @@ use PhpMyAdmin\SqlParser\Parser;
  * This uses Phan's code style
  *
  * @see DollarDollarPlugin for generic plugin documentation.
+ * @phan-file-suppress PhanUnreferencedClosure
  */
 class PhanSQLPlugin extends PluginV2 implements
     AnalyzeFunctionCallCapability,
@@ -129,7 +133,7 @@ class PhanSQLPlugin extends PluginV2 implements
                 continue;
             }
             foreach ($type->getFieldTypes() as $key => $_) {
-                if (substr($key, 0, 1) !== ':') {
+                if (is_string($key) && substr($key, 0, 1) !== ':') {
                     $key = ":$key";
                 }
                 $name_set[$key] = true;
@@ -192,17 +196,59 @@ class PhanSQLPlugin extends PluginV2 implements
             }
 
             // TODO: Move overly specific code into a subclass
-            $sql_raw = preg_replace('/\{\{[pt]key\}\}/i', '', $sql_raw);
 
             // if token is :\w+, then the variable is actually a bind var.
             // $tokens = (new Lexer($sql_raw))->tokens
+            $override_type = $this->getReturnTypeForSQL($code_base, $sql_raw);
+            if ($override_type !== null) {
+                return $override_type;
+            }
 
-            $parser = new Parser($sql_raw);
-            //var_dump($parser->statements);
             //var_dump((new Lexer($sql_raw))->list);
 
             return $default_type;
         };
+    }
+
+    /**
+     * @return ?UnionType
+     */
+    protected function getReturnTypeForSQL(CodeBase $code_base, string $sql_raw)
+    {
+        $sql_raw = $this->normalizeSQL($sql_raw);
+        $parser = new Parser($sql_raw);
+        if (count($parser->statements) !== 1) {
+            return null;
+        }
+        $statement = $parser->statements[0];
+        if ($statement instanceof SelectStatement) {
+            $exprs = $statement->expr;
+            $field_types = [];
+            static $mixed_union_type;
+            if ($mixed_union_type === null) {
+                $mixed_union_type = UnionType::fromFullyQualifiedString('mixed');
+            }
+            foreach ($exprs as $expr) {
+                $alias = strtolower($expr->alias ?? $expr->column ?? $expr->expr ?? '');
+                if (!$alias) {
+                    return null;
+                }
+                // TODO: Infer a type based on knowledge of functions, tables, etc.
+                // E.g. StringType (can the result be null?)
+                $field_types[$alias] = $mixed_union_type;
+            }
+            $shape_type = ArrayShapeType::fromFieldTypes($field_types, false);
+            return UnionType::of([
+                GenericArrayType::fromElementType($shape_type, false, GenericArrayType::KEY_INT),
+                FalseType::instance(false)
+            ]);
+        }
+    }
+
+    protected function normalizeSQL($sql_raw)
+    {
+        $sql_raw = preg_replace('/\{\{[pt]key\}\}/i', '', $sql_raw);
+        return $sql_raw;
     }
 
     /**
@@ -213,8 +259,8 @@ class PhanSQLPlugin extends PluginV2 implements
         $analyzer = $this->generateReturnAnalyzer(0);
 
         return [
-            '\\Ora::execLimitSql' => $analyzer,
-            '\\Ora::execSql' => $analyzer,
+            // '\\Ora::execLimitSql' => $analyzer,
+            // '\\Ora::execSql' => $analyzer,
             '\\Ora::getSelectRows' => $analyzer,
         ];
     }
