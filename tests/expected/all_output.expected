@@ -3,3 +3,4 @@ src/001_exec_bind.php:3 PhanPluginOraUnexpectedBindVar Unexpected bind var :baz.
 src/002_get_select_rows.php:6 PhanTypeMismatchReturn Returning type array<int,array{bar:mixed,other:mixed,count(*):mixed}>|null but test() is declared to return string
 src/003_distinct.php:4 PhanTypeMismatchArgumentInternal Argument 1 (string) is array<int,array{foo:mixed}>|null but \strlen() takes string
 src/004_over.php:4 PhanTypeMismatchArgumentInternal Argument 1 (string) is array<int,array<string,mixed>>|false but \strlen() takes string
+src/005_exec.php:6 PhanTypeMismatchReturn Returning type array<int,array{bar:mixed,other:mixed,count(*):mixed}> but testExecSql() is declared to return string

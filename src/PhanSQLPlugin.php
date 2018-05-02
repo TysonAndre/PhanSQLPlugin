@@ -6,6 +6,7 @@ use Phan\CodeBase;
 use Phan\Issue;
 use Phan\Language\Context;
 use Phan\Language\Element\Method;
+use Phan\Language\Type;
 use Phan\Language\Type\ArrayShapeType;
 use Phan\Language\Type\GenericArrayType;
 use Phan\Language\Type\NullType;
@@ -175,10 +176,14 @@ class PhanSQLPlugin extends PluginV2 implements
     }
 
 
-    public function generateReturnAnalyzer(int $sql_param_index, UnionType $default_types) : \Closure
+    /**
+     * @param ?Closure(UnionType):UnionType $transform_array_shape
+     * @suppress PhanTypeMismatchDeclaredParamNullable https://github.com/phan/phan/issues/1663
+     */
+    public function generateReturnAnalyzer(int $sql_param_index, UnionType $default_types, Closure $transform_array_shape = null) : \Closure
     {
         $parser = new Parser();
-        return function(CodeBase $code_base, Context $context, Method $method, array $args) use ($sql_param_index, $default_types) : UnionType
+        return function(CodeBase $code_base, Context $context, Method $method, array $args) use ($sql_param_index, $default_types, $transform_array_shape) : UnionType
         {
             // E.g. a class constant or a literal string (or a concatenation?)
             $sql_node = $args[$sql_param_index] ?? null;
@@ -198,6 +203,9 @@ class PhanSQLPlugin extends PluginV2 implements
             // $tokens = (new Lexer($sql_raw))->tokens
             $override_type = $this->getReturnTypeForSQL($code_base, $sql_raw, $default_types);
             if ($override_type !== null) {
+                if ($transform_array_shape !== null) {
+                    $override_type = $transform_array_shape($override_type);
+                }
                 return $override_type;
             }
 
@@ -266,11 +274,20 @@ class PhanSQLPlugin extends PluginV2 implements
      */
     public function getReturnTypeOverrides(CodeBase $unused_codebase) : array
     {
-        $analyzer = $this->generateReturnAnalyzer(0, NullType::instance(false)->asUnionType());
+        $null_union_type = NullType::instance(false);
+        $analyzer = $this->generateReturnAnalyzer(0, $null_union_type->asUnionType(), null);
+        $exec_analyzer = $this->generateReturnAnalyzer(0, UnionType::empty(), function(UnionType $shape_type) {
+            // transform array{foo:mixed} to \TemplateOraResult<array{foo:mixed}>
+            $t = Type::fromFullyQualifiedString('\TemplateOraResult');
+            return Type::fromType($t, [$shape_type])->asUnionType();
+        });
 
         return [
-            // '\\Ora::execLimitSql' => $analyzer,
-            // '\\Ora::execSql' => $analyzer,
+            // return objects
+            '\\Ora::execSql' => $exec_analyzer,
+
+            // return arrays
+            '\\Ora::execLimitSql' => $analyzer,
             '\\Ora::getSelectRows' => $analyzer,
         ];
     }
