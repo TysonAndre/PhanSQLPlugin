@@ -230,6 +230,9 @@ class PhanSQLPlugin extends PluginV2 implements
             }
             foreach ($exprs as $expr) {
                 $alias = strtolower($expr->alias ?? $expr->column ?? $expr->expr ?? '');
+                if (preg_match('/^\([^()]+\)$/', $alias)) {
+                    $alias = substr($alias, 1, -1);
+                }
                 if (!$alias) {
                     return null;
                 }
