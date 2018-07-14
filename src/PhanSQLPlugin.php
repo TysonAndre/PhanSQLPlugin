@@ -16,6 +16,9 @@ use Phan\PluginV2\AnalyzeFunctionCallCapability;
 use Phan\PluginV2\ReturnTypeOverrideCapability;
 
 //use PhpMyAdmin\SqlParser\Lexer;
+use PhpMyAdmin\SqlParser\Exceptions\LexerException;
+use PhpMyAdmin\SqlParser\Exceptions\LoaderException;
+use PhpMyAdmin\SqlParser\Exceptions\ParserException;
 use PhpMyAdmin\SqlParser\Parser;
 use PhpMyAdmin\SqlParser\Statements\SelectStatement;
 
@@ -37,6 +40,7 @@ class PhanSQLPlugin extends PluginV2 implements
     // Issue types emitted by this plugin.
     const OraMissingBindVar = 'PhanPluginOraMissingBindVar';
     const OraUnexpectedBindVar = 'PhanPluginOraUnexpectedBindVar';
+    const OraSqlSyntaxError = 'PhanPluginOraSqlSyntaxError';
 
     private function generateParamAnalyzer(int $sql_param_index, int $bind_vars_param_index) : Closure
     {
@@ -58,6 +62,7 @@ class PhanSQLPlugin extends PluginV2 implements
             if (!is_string($sql_raw) || $sql_raw === '') {
                 return;
             }
+            $this->checkForSQLSyntaxErrors($code_base, $context, $this->normalizeSQL($sql_raw));
 
             // Try to find the keys of the array literal, at least for array literals with 100% known keys.
             $bind_vars_union_type = UnionTypeVisitor::unionTypeFromNode($code_base, $context, $bind_vars_node);
@@ -74,6 +79,29 @@ class PhanSQLPlugin extends PluginV2 implements
             $actual_bind_vars = self::extractActualBindVarsFromArrayShapeTypes($bind_vars_union_type);
             $this->compareBindVars($code_base, $context, $expected_bind_vars, $actual_bind_vars);
         };
+    }
+
+    private function checkForSQLSyntaxErrors(CodeBase $code_base, Context $context, string $sql_raw)
+    {
+        try {
+            new Parser($sql_raw, /* strict = */ true);
+        } catch (ParserException | LexerException | LoaderException $e) {
+            $this->emitIssue(
+                $code_base,
+                $context,
+                self::OraSqlSyntaxError,
+                'Failed parsing sql {STRING_LITERAL}. {STRING_LITERAL}: ({STRING_LITERAL}) at "{STRING_LITERAL}"',
+                [
+                    json_encode($sql_raw),
+                    get_class($e),
+                    $e->getMessage(),
+                    isset($e->token) ? $e->token->getInlineToken() : ($e->name ?? $e->ch ?? 'unknown'),
+                ],
+                Issue::SEVERITY_NORMAL,
+                Issue::REMEDIATION_B,
+                16005
+            );
+        }
     }
 
     /**
@@ -182,7 +210,6 @@ class PhanSQLPlugin extends PluginV2 implements
      */
     public function generateReturnAnalyzer(int $sql_param_index, UnionType $default_types, Closure $transform_array_shape = null) : \Closure
     {
-        $parser = new Parser();
         return function(CodeBase $code_base, Context $context, Method $method, array $args) use ($sql_param_index, $default_types, $transform_array_shape) : UnionType
         {
             // E.g. a class constant or a literal string (or a concatenation?)
@@ -218,7 +245,7 @@ class PhanSQLPlugin extends PluginV2 implements
     /**
      * @return ?UnionType
      */
-    protected function getReturnTypeForSQL(CodeBase $code_base, string $sql_raw, UnionType $default_types)
+    protected function getReturnTypeForSQL(CodeBase $unused_code_base, string $sql_raw, UnionType $default_types)
     {
         $sql_raw = $this->normalizeSQL($sql_raw);
         $parser = new Parser($sql_raw);
@@ -264,8 +291,9 @@ class PhanSQLPlugin extends PluginV2 implements
         }
     }
 
-    protected function normalizeSQL($sql_raw)
+    protected function normalizeSQL(string $sql_raw) : string
     {
+        // Strip out {{pkey}} and {{tkey}} from table names
         $sql_raw = preg_replace('/\{\{[pt]key\}\}/i', '', $sql_raw);
         return $sql_raw;
     }
@@ -275,6 +303,13 @@ class PhanSQLPlugin extends PluginV2 implements
      */
     public function getReturnTypeOverrides(CodeBase $unused_codebase) : array
     {
+        if (!class_exists(Parser::class)) {
+            // We need the sql parser library to be part of the Phan installation for the plugin to work.
+            // This might not work for vs code plugins, etc.
+            // This will warn repeatedly in daemon mode due to pcntl being used, but that should be fine
+            fprintf(STDERR, "%s not found, %s will not analyze return statements of sql" . PHP_EOL, Parser::class, self::class);
+            return [];
+        }
         $null_union_type = NullType::instance(false);
         $analyzer = $this->generateReturnAnalyzer(0, $null_union_type->asUnionType(), null);
         $exec_analyzer = $this->generateReturnAnalyzer(0, UnionType::empty(), function(UnionType $shape_type) {
