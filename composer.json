@@ -18,7 +18,7 @@
         }
     },
     "require-dev": {
-        "phan/phan": "^0.12.4"
+        "phan/phan": "^1.1.0"
     },
     "require": {
         "phpmyadmin/sql-parser": "^4.2"
